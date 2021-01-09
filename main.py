@@ -43,12 +43,12 @@ class Crossword(object):
             with open(file_name, 'r') as f:
                 for line in f:
                     # remove trailing new-line char
-                    line = line.rstrip('\n').strip(';')
+                    line = line.rstrip('\n')
                     # skip lines starting with '#' as they are comments in the file
                     if line.startswith('#'):
                         continue
                     else:
-                        my_list = line.strip(';')
+                        my_list = line.split(';')
                         print(my_list)
 
     # print the crossword by overriding __str__ function. Use `print(crossword_object)` to print
