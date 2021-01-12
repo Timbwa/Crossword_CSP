@@ -1,4 +1,5 @@
 from os import path
+import numpy as np
 
 
 # TODO think about backtracking strategy and problem formulation
@@ -10,8 +11,6 @@ from os import path
 # class representing the node in a CSP graph - similar to blanks in the crossword
 # they will be the variables with constraints
 class Node(object):
-    __rec_count = 0  # to prevent infinite recursion of neighbors
-
     def __init__(self, word, x_coordinate, y_coordinate, word_size, orientation):
         self.word = word
         self.coordinates = (x_coordinate, y_coordinate)
@@ -26,19 +25,13 @@ class Node(object):
     # override the __str__ functions to print the Node
     def __str__(self):
         # only print immediate neighbors
-        if self.__rec_count == 1:
-            self.__rec_count = 0
-            return f'First Letter Coordinates: {self.coordinates}\n' \
-                   f'Orientation: {self.orientation}\n'
-        else:
-            return f'\nWord: {self.word}\n' \
-                   f'First Letter Coordinates: {self.coordinates}\n' \
-                   f'Word size: {self.word_size}\n' \
-                   f'Orientation: {self.orientation}\n' \
-                   f'Neighbors: {self.neighbors}\n'
+        return f'\nWord: {self.word}\n' \
+               f'First Letter Coordinates: {self.coordinates}\n' \
+               f'Word size: {self.word_size}\n' \
+               f'Orientation: {self.orientation}\n' \
+               f'Neighbors: {[(node.coordinates, node.orientation) for i, node in self.neighbors.items()]}\n'
 
     def __repr__(self):
-        self.__rec_count += 1
         return str(self)
 
     # override equality comparator. This assumes the starting char of a blank can't be in the same coordinates
@@ -112,36 +105,77 @@ class Crossword(object):
         else:
             print(f'Error opening {file_name}. Check if it exists.')
 
-    # TODO connect neighbors
     # connect the neighbors of variables
-    # noinspection DuplicatedCode
     def connect_neighbors(self):
         # find neighbors for all nodes
-        for index, node in self.blanks.items():
+        for index, node4 in self.blanks.items():
             # look for nodes
-            if node.orientation == 'across':
+            if node4.orientation == 'across':
                 # go over whole list of nodes ignoring current one
                 for index1, ex_node in self.blanks.items():
-                    if node == ex_node:
+                    if node4 == ex_node:
                         continue
                     else:
                         # check for nodes in the same row
-                        if ex_node.coordinates[1] == node.coordinates[1] \
-                                and ex_node not in node.neighbors \
-                                and node not in ex_node.neighbors:
-                            node.neighbors[ex_node.coordinates] = ex_node
-                            ex_node.neighbors[node.coordinates] = node
-            elif node.orientation == 'down':
+                        if ex_node.coordinates[1] == node4.coordinates[1] \
+                                and (ex_node not in node4.neighbors or node4 not in ex_node.neighbors) \
+                                and not self.obstacle_exists_between(ex_node, node4, node4.coordinates[1], 'across'):
+                            node4.neighbors[ex_node.coordinates] = ex_node
+                            ex_node.neighbors[node4.coordinates] = node4
+                        # check for nodes in the same column if obstacle doesn't exist between them
+                        if ex_node.coordinates[0] == node4.coordinates[0] \
+                                and (ex_node not in node4.neighbors or node4 not in ex_node.neighbors) \
+                                and not self.obstacle_exists_between(ex_node, node4, node4.coordinates[0], 'down'):
+                            node4.neighbors[ex_node.coordinates] = ex_node
+                            ex_node.neighbors[node4.coordinates] = node4
+            elif node4.orientation == 'down':
                 for index1, ex_node in self.blanks.items():
-                    if node == ex_node:
+                    if node4 == ex_node:
                         continue
                     else:
                         # check for nodes in the same column
-                        if ex_node.coordinates[1] == node.coordinates[1]\
-                                and ex_node not in node.neighbors \
-                                and node not in ex_node.neighbors:
-                            node.neighbors[ex_node.coordinates] = ex_node
-                            ex_node.neighbors[node.coordinates] = node
+                        if ex_node.coordinates[0] == node4.coordinates[0] \
+                                and (ex_node not in node4.neighbors or node4 not in ex_node.neighbors) \
+                                and not self.obstacle_exists_between(ex_node, node4, node4.coordinates[0], 'down'):
+                            node4.neighbors[ex_node.coordinates] = ex_node
+                            ex_node.neighbors[node4.coordinates] = node4
+                        # check for nodes in the same row
+                        if ex_node.coordinates[1] == node4.coordinates[1] \
+                                and (ex_node not in node4.neighbors or node4 not in ex_node.neighbors) \
+                                and not self.obstacle_exists_between(ex_node, node4, node4.coordinates[1], 'across'):
+                            node4.neighbors[ex_node.coordinates] = ex_node
+                            ex_node.neighbors[node4.coordinates] = node4
+        # manually add neighbors which intersect
+        # specifically;
+        # 4 (1, 2) intersects 2 (2, 0) & 3 (4, 0)
+        # 7 (2, 3) intersects 5 (3, 2) & 3
+        # 8 (0, 4) intersects 2 & 5 & 3
+        # -- may automate this addition later --
+        node2 = self.blanks.get((2, 0))
+        node3 = self.blanks.get((4, 0))
+        node4 = self.blanks.get((1, 2))
+        node5 = self.blanks.get((3, 2))
+        node7 = self.blanks.get((2, 3))
+        node8 = self.blanks.get((0, 4))
+        if isinstance(node2, Node) and isinstance(node3, Node) and isinstance(node4, Node) and isinstance(node5, Node) \
+                and isinstance(node7, Node) and isinstance(node8, Node):
+            # node 4 neighbors
+            node4.neighbors[node2.coordinates] = node2
+            node4.neighbors[node3.coordinates] = node3
+            node2.neighbors[node4.coordinates] = node4
+            node3.neighbors[node4.coordinates] = node4
+            # node 7 neighbors
+            node7.neighbors[node5.coordinates] = node5
+            node7.neighbors[node3.coordinates] = node3
+            node5.neighbors[node4.coordinates] = node7
+            node3.neighbors[node4.coordinates] = node7
+            # node 8 neighbors
+            node8.neighbors[node2.coordinates] = node2
+            node8.neighbors[node5.coordinates] = node5
+            node8.neighbors[node3.coordinates] = node3
+            node2.neighbors[node8.coordinates] = node8
+            node5.neighbors[node8.coordinates] = node8
+            node3.neighbors[node8.coordinates] = node8
 
     # determine if the crossword is empty. Needed in order to determine first variable to assign -> degree heuristic
     def is_empty(self):
@@ -166,6 +200,39 @@ class Crossword(object):
         print(self.blanks)
         print(f'Number of blanks: {len(self.blanks)}')
 
+    # checks to see if there exists an obstacle between one node and the other in a specific axis=1/0
+    def obstacle_exists_between(self, this_node, that_node, coordinate, orientation):
+        # transpose matrix
+        if orientation == 'down':
+            t_drawing = np.transpose(self.drawing)
+            row = t_drawing[coordinate].tolist()
+            try:
+                # check to see if '#' exists between them
+                if this_node.coordinates[1] > that_node.coordinates[1]:
+                    index = row.index('#', that_node.coordinates[1], this_node.coordinates[1])
+                else:
+                    index = row.index('#', this_node.coordinates[1], that_node.coordinates[1])
+                # if index gets a value, there exists an obstacle between them
+                return True
+            except ValueError:
+                # couldn't find a '#' between them
+                return False
+        elif orientation == 'across':
+            # don't transpose
+            row = self.drawing[coordinate]
+            try:
+                # check to see if '#' exists between them
+                if this_node.coordinates[0] > that_node.coordinates[0]:
+                    index = row.index('#', that_node.coordinates[0], this_node.coordinates[0])
+                else:
+                    index = row.index('#', this_node.coordinates[0], that_node.coordinates[0])
+                # if index gets a value, there exists an obstacle between them
+                return True
+            except ValueError:
+                # couldn't find a '#' between them
+                return False
+        return False
+
 
 # function to read the words used to solve the crossword
 def read_words(file_name):
@@ -187,7 +254,7 @@ def main():
     blanks_file_name = 'blanks.txt'
 
     crossword = Crossword(crossword_file_name, blanks_file_name)
-    # print(crossword)
+    print(crossword)
     crossword.print_blanks()
 
     words = read_words(words_file_name)
