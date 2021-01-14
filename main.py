@@ -140,12 +140,35 @@ class Crossword(object):
                             node.neighbors[(ex_node.coordinates[0], node.coordinates[1])] = ex_node
                             ex_node.neighbors[(ex_node.coordinates[0], node.coordinates[1])] = node
 
-    # determine if the crossword is empty. Needed in order to determine first variable to assign -> degree heuristic
-    def is_empty(self):
-        for node in self.blanks:
+    # helper function to reprint any character that may have been deleted at the a cross-section during backtracking
+    def reprint_words(self):
+        for key, node in self.blanks.items():
             if node.word != '':
-                return False
-        return True
+                if node.orientation == 'across':
+                    for shift in range(len(node.word)):
+                        self.drawing[node.coordinates[1]][node.coordinates[0] + shift] = node.word[shift]
+                elif node.orientation == 'down':
+                    for shift in range(len(node.word)):
+                        self.drawing[node.coordinates[1] + shift][node.coordinates[0]] = node.word[shift]
+
+    # update crossword drawing with new assignment
+    def update_crossword(self, node):
+        if node.word != '':
+            if node.orientation == 'across':
+                for shift in range(len(node.word)):
+                    self.drawing[node.coordinates[1]][node.coordinates[0] + shift] = node.word[shift]
+            elif node.orientation == 'down':
+                for shift in range(len(node.word)):
+                    self.drawing[node.coordinates[1] + shift][node.coordinates[0]] = node.word[shift]
+            self.reprint_words()
+        else:
+            if node.orientation == 'across':
+                for shift in range(node.word_size):
+                    self.drawing[node.coordinates[1]][node.coordinates[0] + shift] = '_'
+            elif node.orientation == 'down':
+                for shift in range(node.word_size):
+                    self.drawing[node.coordinates[1] + shift][node.coordinates[0]] = '_'
+            self.reprint_words()
 
     # print the crossword by overriding __str__ function. Use `print(crossword_object)` to print
     def __str__(self):
@@ -212,28 +235,39 @@ def minimum_remaining_value_heuristic(crossword):
         for key, node in crossword.blanks.items():
             if len(node.domain) < len(min_node.domain) and node.word == '':
                 min_node = node
+            elif len(node.domain) == len(min_node.domain) and node.word == '':
+                min_node = degree_heuristic_(min_node, node)
     return min_node
 
 
-# function used in the lambda function of sorted to sort values by least constraining to most constraining
+def get_starting_indices(node, neighbor):
+    # get the respective indices where a node and it's neighbor intersect
+    keys = list(node.neighbors.keys())
+    neighbors = list(node.neighbors.values())
+    position = neighbors.index(neighbor)
+    key = keys[position]
+    node_index = None
+    neigh_index = None
+    if node.orientation == 'across':
+        node_index = abs(key[0] - node.coordinates[0])
+        neigh_index = abs(key[1] - neighbor.coordinates[1])
+    elif node.orientation == 'down':
+        node_index = abs(key[1] - node.coordinates[1])
+        neigh_index = abs(key[0] - neighbor.coordinates[0])
+    return node_index, neigh_index
+
+
+# function used in the lambda function of sorted below to sort values by least constraining to most constraining
 def get_sum_neighbors_values(word, node):
     _sum = 0
     # calculate the total number of restrictions of each neighbor using the given word
     for key, nn in node.neighbors.items():
-        # get the respective indices where they intersect
-        if node.orientation == 'across':
-            node_index = abs(key[0] - node.coordinates[0])
-            neigh_index = abs(key[1] - nn.coordinates[1])
-        elif node.orientation == 'down':
-            node_index = abs(key[1] - node.coordinates[1])
-            neigh_index = abs(key[0] - nn.coordinates[0])
-
-        # if key == nn.coordinates:
-        #     neigh_index = 0
+        #
+        node_index, neigh_index = get_starting_indices(node, nn)
         for word_nn in nn.domain:
-            if word[node_index].lower() == word_nn[neigh_index].lower() and word != word_nn:
+            if word[node_index] == word_nn[neigh_index] and word != word_nn:
                 _sum += 1
-                print(f'word: {word}, word_nn {word_nn}, sum: {_sum}, node: {node.coordinates} neighbor: {nn.coordinates} n_nn: {node_index}, {neigh_index}')
+                # print(f'word: {word}, word_nn {word_nn}, sum: {_sum}, node: {node.coordinates} neighbor: {nn.coordinates} n_nn: {node_index}, {neigh_index}')
     return _sum
 
 
@@ -241,6 +275,26 @@ def get_sum_neighbors_values(word, node):
 # left for neighbors
 def order_domain_values(node):
     return sorted(node.domain, key=lambda word: get_sum_neighbors_values(word, node), reverse=True)
+
+
+# check if current assignment of the variable is consistent according to constraints
+def is_consistent(node, word):
+    # assumes node is assigned
+    # constraints for a given variable for a crossword is that:
+    # the word is not the same as neighbor
+    # the letter at the point of intersection with neighbor should be similar
+    # the word should be same size as blank -> covered by domain initialization
+
+    # check consistency for all neighbors
+    for key, neighbor in node.neighbors.items():
+        # if neighbor is unassigned or if the word is same as neighbor
+        if neighbor.word == '' or (word == neighbor.word):
+            continue
+        else:
+            node_index, neigh_index = get_starting_indices(node, neighbor)
+            if word[node_index] != neighbor.word[neigh_index]:
+                return False
+    return True
 
 
 
@@ -254,9 +308,25 @@ is_first_call -> Boolean value to determine if function is on root call hence us
 """
 
 
+def assignment(crossword, node, word, undo):
+    # if undo == FALSE, assigns the word to node and removes it from the domain of other nodes
+    # if undo == TRUE, removes assignment from the node and re-adds the word to the domains of other nodes
+    if not undo:
+        node.word = word
+        for key, variable in crossword.blanks.items():
+            if node != variable and variable.word == '' and variable.word_size == len(word) and word in variable.domain:
+                variable.domain.remove(word)
+    else:
+        node.word = ''
+        for key, variable in crossword.blanks.items():
+            if node != variable and variable.word == '' and variable.word_size == len(word) and word not in variable.domain:
+                variable.domain.append(word)
+
+
+
 def backtrack_solve_crossword(crossword, is_first_call=True):
     if is_assignment_complete(crossword):
-        return crossword
+        return True
     # do assignment for specific node. if it's first time the function is called, use degree heuristic to determine the
     # variable to start searching
     if is_first_call:
@@ -266,9 +336,30 @@ def backtrack_solve_crossword(crossword, is_first_call=True):
 
     # after determining the node to search order the values to try
     # for word in order_domain_values(node, crossword):
-    node = crossword.blanks.get((2, 3))
+    # node = crossword.blanks.get((2, 3))
     domain = order_domain_values(node)
-    print(domain)
+    print(f'trying node: {node.coordinates}')
+    print(f'It\'s domain{domain}')
+    for word in domain:
+        if is_consistent(node, word):
+            print(f'consistent word is: {word}')
+            # do assignment
+            assignment(crossword, node, word, False)
+            crossword.update_crossword(node)
+            print(crossword)
+
+            # do forward check
+            result = backtrack_solve_crossword(crossword, False)
+            if result:
+                return result
+            print(f'Backtracking...')
+            # undo assignment
+            assignment(crossword, node, word, True)
+            crossword.update_crossword(node)
+            print(crossword)
+
+    print(f'No suitable word')
+    return False
 
 
 # function to read the words used to solve the crossword
@@ -293,8 +384,10 @@ def main():
     words = read_words(words_file_name)
     crossword = Crossword(crossword_file_name, blanks_file_name, words)
     print(crossword)
-    crossword.print_blanks()
-    backtrack_solve_crossword(crossword)
+    if backtrack_solve_crossword(crossword):
+        print(f'Solution found!')
+    else:
+        print(f'No solution!')
 
 
 if __name__ == '__main__':
