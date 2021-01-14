@@ -1,11 +1,4 @@
 from os import path
-import numpy as np
-
-
-# TODO think about backtracking strategy and problem formulation
-# degree heuristic -> number of connected neighbors. For first time solving
-# Variable ordering heuristic -> Minimum remaining variables
-# Least constraining heuristic -> Least constraining value
 
 
 # class representing the node in a CSP graph - similar to blanks in the crossword
@@ -18,10 +11,11 @@ class Node(object):
         self.orientation = orientation
 
         # list of immediate Node neighbors, where a neighbor is a blank whose starting position is part of another
-        # blank For the neighbors dict, the key is the coordinate of the first char of the neighbor, value is the
-        # neighboring node object
+        # blank. For the neighbors dict, the key is the coordinate of the first char of the neighbor, value is the
+        # neighboring node object.
+        # A node can only have neighbors of different orientation
         self.neighbors = {}
-        # domain used in backtracking strategy
+        # domain of a Variable used in backtracking strategy
         self.domain = []
 
     # override the __str__ functions to print the Node
@@ -48,6 +42,11 @@ class Node(object):
     # hash the coordinates as I assume the starting char of a blank can't be in the same coordinates as another node
     def __hash__(self):
         return hash(self.coordinates)
+
+    # override less_than function used in sorting nodes. Used in the degree_heuristic function
+    def __lt__(self, other):
+        if isinstance(other, Node):
+            return len(self.neighbors) < len(other.neighbors)
 
 
 # A class representing the Crossword drawing with the blanks and their positions
@@ -115,7 +114,7 @@ class Crossword(object):
             print(f'Error opening {file_name}. Check if it exists.')
 
     # determine the domains using the wordlist where a word is in the domain of a variable if it's length is the same as
-    # variable word size length
+    # variable word_size length
     def __initialize_domains(self):
         for key, node in self.blanks.items():
             for word in self.words:
@@ -140,7 +139,7 @@ class Crossword(object):
                             node.neighbors[(ex_node.coordinates[0], node.coordinates[1])] = ex_node
                             ex_node.neighbors[(ex_node.coordinates[0], node.coordinates[1])] = node
 
-    # helper function to reprint any character that may have been deleted at the a cross-section during backtracking
+    # helper function to reprint any character that may have been deleted at an intersection during backtracking
     def reprint_words(self):
         for key, node in self.blanks.items():
             if node.word != '':
@@ -195,18 +194,6 @@ def is_assignment_complete(crossword):
     return True
 
 
-# determine the variable with most constraints on other variables. In this use case, it is the one with the most
-# neighbors may change to return ordered list of nodes.
-# should ONLY be called on the first call of backtracking algorithm
-def degree_heuristic(crossword):
-    # get first node in the list
-    max_node = crossword.blanks.get((0, 0))
-    for key, node in crossword.blanks.items():
-        if max_node != node and (len(node.neighbors) > len(max_node.neighbors)):
-            max_node = node
-    return max_node
-
-
 # function used in tie breaking between two nodes when using minimum remaining value.
 def degree_heuristic_(this_node, that_node):
     if len(this_node.neighbors) > len(that_node.neighbors):
@@ -225,8 +212,8 @@ def get_first_unassigned_node(crossword):
                 return node
 
 
-# AKA `fail first heuristic`returns the unassigned variable with the least number of possible values left. Hence failing
-# early and pruning the search tree
+# AKA `fail-first heuristic`: returns the unassigned variable with the least number of possible values left. Hence
+# failing early and pruning the search tree
 def minimum_remaining_value_heuristic(crossword):
     min_node = get_first_unassigned_node(crossword)
     if min_node is None:
@@ -240,6 +227,8 @@ def minimum_remaining_value_heuristic(crossword):
     return min_node
 
 
+# given an intersection between two neighboring nodes, this function returns the starting index of each node.
+# Used in consistency check and ordering
 def get_starting_indices(node, neighbor):
     # get the respective indices where a node and it's neighbor intersect
     keys = list(node.neighbors.keys())
@@ -267,7 +256,6 @@ def get_sum_neighbors_values(word, node):
         for word_nn in nn.domain:
             if word[node_index] == word_nn[neigh_index] and word != word_nn:
                 _sum += 1
-                # print(f'word: {word}, word_nn {word_nn}, sum: {_sum}, node: {node.coordinates} neighbor: {nn.coordinates} n_nn: {node_index}, {neigh_index}')
     return _sum
 
 
@@ -280,7 +268,7 @@ def order_domain_values(node):
 # check if current assignment of the variable is consistent according to constraints
 def is_consistent(node, word):
     # assumes node is assigned
-    # constraints for a given variable for a crossword is that:
+    # a constraint for a given variable for a crossword is:
     # the word is not the same as neighbor
     # the letter at the point of intersection with neighbor should be similar
     # the word should be same size as blank -> covered by domain initialization
@@ -297,17 +285,7 @@ def is_consistent(node, word):
     return True
 
 
-
-""" 
-backtracking algorithm
------------------------
-params:
-crossword -> crossword object
-is_first_call -> Boolean value to determine if function is on root call hence use degree heuristic if true else use 
-                Minimum remaining value heuristic    
-"""
-
-
+# performs assignment and de-assignment of variables in the backtracking solution
 def assignment(crossword, node, word, undo):
     # if undo == FALSE, assigns the word to node and removes it from the domain of other nodes
     # if undo == TRUE, removes assignment from the node and re-adds the word to the domains of other nodes
@@ -319,28 +297,53 @@ def assignment(crossword, node, word, undo):
     else:
         node.word = ''
         for key, variable in crossword.blanks.items():
-            if node != variable and variable.word == '' and variable.word_size == len(word) and word not in variable.domain:
+            if node != variable and variable.word == '' and variable.word_size == len(
+                    word) and word not in variable.domain:
                 variable.domain.append(word)
 
 
+# function used to order the degrees of variables. Backtracking strategy starts with the variable with the highest
+# degree. If it fails pick the one with subsequent degree.
+# It determine the variable with most constraints on other variables. In this use case, it is the one with the most
+# neighbors.
+def degree_heuristic(crossword):
+    # return a list of nodes ordered by their degree from most to least
+    nodes = list(crossword.blanks.values())
+    sorted_nodes = sorted(nodes, reverse=True)
+    return sorted_nodes
 
-def backtrack_solve_crossword(crossword, is_first_call=True):
+
+""" 
+backtracking algorithm
+-----------------------
+params:
+crossword -> crossword object
+is_first_call -> Boolean value to determine if function is on root call hence use degree heuristic if true, else use 
+                Minimum remaining value heuristic for determining next variable to try
+Heuristics used:
+-> Degree heuristic : for determining first variable to assign and for tie-braking nodes in the MRV below
+-> Minimum Remaining Value: for determining subsequent variables to assign
+_______________________
+"""
+
+
+def backtrack_solve_crossword(crossword, node_, is_first_call=True):
     if is_assignment_complete(crossword):
         return True
     # do assignment for specific node. if it's first time the function is called, use degree heuristic to determine the
     # variable to start searching
-    if is_first_call:
-        node = degree_heuristic(crossword)
-    else:
+
+    if not is_first_call:
         node = minimum_remaining_value_heuristic(crossword)
+    else:
+        node = node_
 
     # after determining the node to search order the values to try
-    # for word in order_domain_values(node, crossword):
-    # node = crossword.blanks.get((2, 3))
     domain = order_domain_values(node)
-    print(f'trying node: {node.coordinates}')
-    print(f'It\'s domain{domain}')
+    print(f'Trying node: {node.coordinates}')
+    print(f'It\'s ordered domain: {domain}')
     for word in domain:
+        print(f'Try word: {word}')
         if is_consistent(node, word):
             print(f'consistent word is: {word}')
             # do assignment
@@ -348,8 +351,8 @@ def backtrack_solve_crossword(crossword, is_first_call=True):
             crossword.update_crossword(node)
             print(crossword)
 
-            # do forward check
-            result = backtrack_solve_crossword(crossword, False)
+            # May implement forward check in future
+            result = backtrack_solve_crossword(crossword, node, False)
             if result:
                 return result
             print(f'Backtracking...')
@@ -358,7 +361,7 @@ def backtrack_solve_crossword(crossword, is_first_call=True):
             crossword.update_crossword(node)
             print(crossword)
 
-    print(f'No suitable word')
+    print(f'No suitable word...')
     return False
 
 
@@ -381,13 +384,27 @@ def main():
     words_file_name = 'words.txt'
     blanks_file_name = 'blanks.txt'
 
+    # read words and instantiate crossword object
     words = read_words(words_file_name)
     crossword = Crossword(crossword_file_name, blanks_file_name, words)
+
+    print('Crossword drawing:')
     print(crossword)
-    if backtrack_solve_crossword(crossword):
-        print(f'Solution found!')
-    else:
-        print(f'No solution!')
+
+    # solve crossword using backtracking algorithm
+    result = None
+    # start solving for node with highest degree
+    for node in degree_heuristic(crossword):
+        if isinstance(node, Node):
+            result = backtrack_solve_crossword(crossword, node, is_first_call=True)
+            if result:
+                print(f'Solution found!')
+                return
+            else:
+                # if starting with the current node fails, start with the next one
+                print(f'Trying different start variable...')
+    if not result:
+        print('No solution')
 
 
 if __name__ == '__main__':
